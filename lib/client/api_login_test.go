@@ -37,7 +37,6 @@ import (
 	"github.com/gravitational/teleport/lib/service"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/utils"
-	"github.com/gravitational/teleport/lib/utils/prompt"
 	"github.com/jonboulle/clockwork"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
@@ -80,9 +79,11 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 
 	// Reset functions after tests.
 	oldPwd := *client.PasswordFromConsoleFn
+	oldOTP, oldWebauthn := *client.PromptOTP, *client.PromptWebauthn
 	t.Cleanup(func() {
 		*client.PasswordFromConsoleFn = oldPwd
-		client.Prompts.Reset()
+		*client.PromptOTP = oldOTP
+		*client.PromptWebauthn = oldWebauthn
 	})
 	*client.PasswordFromConsoleFn = func() (string, error) {
 		return password, nil
@@ -137,15 +138,13 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			client.Prompts.Swap(
-				func(ctx context.Context, out io.Writer, in prompt.Reader, question string) (string, error) {
-					return test.solveOTP(ctx)
-				},
-				func(ctx context.Context, origin, _ string, assertion *wanlib.CredentialAssertion, _ wancli.LoginPrompt) (*proto.MFAAuthenticateResponse, string, error) {
-					resp, err := test.solveWebauthn(ctx, origin, assertion)
-					return resp, "", err
-				},
-			)
+			*client.PromptOTP = func(out io.Writer, question string) (string, error) {
+				return test.solveOTP(ctx)
+			}
+			*client.PromptWebauthn = func(ctx context.Context, origin, _ string, assertion *wanlib.CredentialAssertion, _ wancli.LoginPrompt) (*proto.MFAAuthenticateResponse, string, error) {
+				resp, err := test.solveWebauthn(ctx, origin, assertion)
+				return resp, "", err
+			}
 
 			authServer := sa.Auth.GetAuthServer()
 			pref, err := authServer.GetAuthPreference(ctx)

@@ -20,49 +20,44 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gravitational/teleport/api/client/proto"
-	"github.com/gravitational/teleport/lib/utils/prompt"
 	"github.com/gravitational/trace"
 
 	wanlib "github.com/gravitational/teleport/lib/auth/webauthn"
 	wancli "github.com/gravitational/teleport/lib/auth/webauthncli"
 )
 
-type (
-	OTPPrompt func(ctx context.Context, out io.Writer, in prompt.Reader, question string) (string, error)
-	WebPrompt func(
-		ctx context.Context,
-		origin, user string,
-		assertion *wanlib.CredentialAssertion,
-		prompt wancli.LoginPrompt) (*proto.MFAAuthenticateResponse, string, error)
-)
+// promptOTP and promptWebauthn provide indirection for tests.
+var promptOTP = ReadPassword
+var promptWebauthn = wancli.Login
 
-// PlatformPrompt groups functions that prompt the user for inputs.
-// It's purpose is to allow tests to replace actual user prompts with other
-// functions.
-type PlatformPrompt struct {
-	// OTP is the OTP prompt function.
-	OTP OTPPrompt
-	// Webauthn is the WebAuth prompt function.
-	Webauthn WebPrompt
+type stdinRead struct {
+	value string
+	err   error
 }
 
-func (pp *PlatformPrompt) Reset() *PlatformPrompt {
-	pp.Swap(prompt.Input, wancli.Login)
-	return pp
+// stdinHijack hijacks stdin for a single password-like read.
+// After startRead is called the read will be sent to the C channel.
+type stdinHijack struct {
+	C       chan stdinRead
+	started int32
 }
 
-func (pp *PlatformPrompt) Swap(otp OTPPrompt, web WebPrompt) {
-	pp.OTP = otp
-	pp.Webauthn = web
+func (h *stdinHijack) startRead() {
+	if !atomic.CompareAndSwapInt32(&h.started, 0, 1) {
+		return // Already started
+	}
+	h.C = make(chan stdinRead)
+	go func() {
+		value, err := passwordFromConsoleFn()
+		h.C <- stdinRead{value: value, err: err}
+	}()
 }
-
-var prompts = (&PlatformPrompt{}).Reset()
 
 type noopPrompt struct{}
 
@@ -80,10 +75,10 @@ func (p noopPrompt) PromptAdditionalTouch() error {
 
 // PromptMFAChallenge prompts the user to complete MFA authentication
 // challenges.
-//
 // If promptDevicePrefix is set, it will be printed in prompts before "security
 // key" or "device". This is used to emphasize between different kinds of
 // devices, like registered vs new.
+// Note that PromptMFAChallenge hijacks stdin for a possible OTP/PIN read.
 func PromptMFAChallenge(
 	ctx context.Context,
 	proxyAddr string, c *proto.MFAAuthenticateChallenge, promptDevicePrefix string, quiet bool) (*proto.MFAAuthenticateResponse, error) {
@@ -128,31 +123,38 @@ func PromptMFAChallenge(
 	}
 
 	// Fire TOTP goroutine.
+	stdin := &stdinHijack{}
 	if hasTOTP {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			const kind = "TOTP"
-			var msg string
 			if !quiet {
 				if hasWebauthn {
-					msg = fmt.Sprintf("Tap any %[1]ssecurity key or enter a code from a %[1]sOTP device", promptDevicePrefix, promptDevicePrefix)
+					fmt.Fprintf(os.Stderr, "Tap any %[1]ssecurity key or enter a code from a %[1]sOTP device", promptDevicePrefix, promptDevicePrefix)
 				} else {
-					msg = fmt.Sprintf("Enter an OTP code from a %sdevice", promptDevicePrefix)
+					fmt.Fprintf(os.Stderr, "Enter an OTP code from a %sdevice", promptDevicePrefix)
 				}
 			}
-			code, err := prompts.OTP(ctx, os.Stderr, prompt.Stdin(), msg)
-			if err != nil {
-				respC <- response{kind: kind, err: err}
+
+			stdin.startRead()
+			select {
+			case <-ctx.Done():
+				respC <- response{kind: kind, err: ctx.Err()}
 				return
-			}
-			respC <- response{
-				kind: kind,
-				resp: &proto.MFAAuthenticateResponse{
-					Response: &proto.MFAAuthenticateResponse_TOTP{
-						TOTP: &proto.TOTPResponse{Code: code},
+			case read := <-stdin.C:
+				if read.err != nil {
+					respC <- response{kind: kind, err: read.err}
+					return
+				}
+				respC <- response{
+					kind: kind,
+					resp: &proto.MFAAuthenticateResponse{
+						Response: &proto.MFAAuthenticateResponse_TOTP{
+							TOTP: &proto.TOTPResponse{Code: read.value},
+						},
 					},
-				},
+				}
 			}
 		}()
 	} else if !quiet {
@@ -171,7 +173,7 @@ func PromptMFAChallenge(
 			log.Debugf("WebAuthn: prompting devices with origin %q", origin)
 			const user = ""       // No ambiguity in MFA prompts.
 			var prompt noopPrompt // No PINs or additional touches required for MFA.
-			resp, _, err := prompts.Webauthn(ctx, origin, user, wanlib.CredentialAssertionFromProto(c.WebauthnChallenge), prompt)
+			resp, _, err := promptWebauthn(ctx, origin, user, wanlib.CredentialAssertionFromProto(c.WebauthnChallenge), prompt)
 			respC <- response{kind: "WEBAUTHN", resp: resp, err: err}
 		}()
 	}

@@ -3099,24 +3099,27 @@ func Username() (string, error) {
 
 // AskOTP prompts the user to enter the OTP token.
 func (tc *TeleportClient) AskOTP() (token string, err error) {
-	fmt.Fprintf(tc.Config.Stderr, "Enter your OTP token:\n")
-	token, err = passwordFromConsoleFn()
-	if err != nil {
-		fmt.Fprintln(tc.Stderr, err)
-		return "", trace.Wrap(err)
-	}
-	return token, nil
+	return ReadPassword(tc.Stderr, "Enter your OTP token:")
 }
 
 // AskPassword prompts the user to enter the password
 func (tc *TeleportClient) AskPassword() (pwd string, err error) {
-	fmt.Fprintf(tc.Config.Stderr, "Enter password for Teleport user %v:\n", tc.Config.Username)
-	pwd, err = passwordFromConsoleFn()
+	return ReadPassword(tc.Stderr, fmt.Sprintf("Enter password for Teleport user %v:", tc.Config.Username))
+}
+
+// ReadPassword reads a password-like string from stdin.
+// out is used to write user prompts.
+// question is the prompt question, without a newline at the end. An empty
+// question prints nothing to out.
+func ReadPassword(out io.Writer, question string) (string, error) {
+	if question != "" {
+		fmt.Fprintln(out, question)
+	}
+	pwd, err := passwordFromConsoleFn()
 	if err != nil {
-		fmt.Fprintln(tc.Stderr, err)
+		fmt.Fprintln(out, err)
 		return "", trace.Wrap(err)
 	}
-
 	return pwd, nil
 }
 
@@ -3191,11 +3194,7 @@ var passwordFromConsoleFn = passwordFromConsole
 
 // passwordFromConsole reads from stdin without echoing typed characters to stdout
 func passwordFromConsole() (string, error) {
-	// syscall.Stdin is not an int on windows. The linter will complain only on
-	// linux where syscall.Stdin is an int.
-	//
-	// nolint:unconvert
-	fd := int(syscall.Stdin)
+	fd := int(os.Stdin.Fd())
 	state, err := term.GetState(fd)
 
 	// intercept Ctr+C and restore terminal
@@ -3208,15 +3207,13 @@ func passwordFromConsole() (string, error) {
 		go func() {
 			select {
 			case <-sigCh:
-				term.Restore(fd, state)
+				_ = term.Restore(fd, state)
 				os.Exit(1)
 			case <-closeCh:
 			}
 		}()
 	}
-	defer func() {
-		close(closeCh)
-	}()
+	defer close(closeCh)
 
 	bytes, err := term.ReadPassword(fd)
 	return string(bytes), err
