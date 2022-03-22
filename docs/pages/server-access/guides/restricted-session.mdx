@@ -27,8 +27,7 @@ Teleport supports network restrictions with more types coming in the future.
 
   See [Installation](../../installation.mdx) for details.
 
-- A host running Linux kernel 5.8 (or above), which you will use to deploy a
-  Teleport Node.
+- A Teleport Node running on a host with Linux kernel 5.8 (or above).
 
   You can check your kernel version using the `uname` command. The output should look
   something like the following.
@@ -57,8 +56,7 @@ Teleport supports network restrictions with more types coming in the future.
   # Teleport v(=teleport.version=) go(=teleport.golang=)
   ```
 
-- A host running Linux kernel 5.8 (or above), which you will use to deploy a
-  Teleport Node.
+- A Teleport Node running on a host with Linux kernel 5.8 (or above).
 
   You can check your kernel version using the `uname` command. The output should look
   something like the following.
@@ -86,8 +84,7 @@ the [customer portal](https://dashboard.gravitational.com/web/login).
   # Teleport v(=teleport.version=) go(=teleport.golang=)
   ```
 
-- A host running Linux kernel 5.8 (or above), which you will use to deploy a
-  Teleport Node.
+- A Teleport Node running on a host with Linux kernel 5.8 (or above).
 
   You can check your kernel version using the `uname` command. The output should look
   something like the following.
@@ -216,7 +213,7 @@ However when the `network_restrictions` object is created, the default policy
 switches to deny-all. If you expect network operations to target certain
 IP ranges, be sure to state these within the `allow` section.
 
-## Step 3/4. Test by logging into your Node via Teleport
+## Step 3/4. Test Restricted Sessions
 
 ```code
 $ curl -v https://google.com
