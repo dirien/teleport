@@ -15,5 +15,4 @@
 package client
 
 var PasswordFromConsoleFn = &passwordFromConsoleFn
-var PromptOTP = &promptOTP
 var PromptWebauthn = &promptWebauthn

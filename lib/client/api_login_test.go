@@ -78,22 +78,20 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 	cfg.InsecureSkipVerify = true
 
 	// Reset functions after tests.
-	oldPwd := *client.PasswordFromConsoleFn
-	oldOTP, oldWebauthn := *client.PromptOTP, *client.PromptWebauthn
+	oldPwd, oldWebauthn := *client.PasswordFromConsoleFn, *client.PromptWebauthn
 	t.Cleanup(func() {
 		*client.PasswordFromConsoleFn = oldPwd
-		*client.PromptOTP = oldOTP
 		*client.PromptWebauthn = oldWebauthn
 	})
-	*client.PasswordFromConsoleFn = func() (string, error) {
+
+	userPasswordFn := func(ctx context.Context) (string, error) {
 		return password, nil
 	}
-
-	promptOTPNoop := func(ctx context.Context) (string, error) {
+	noopPasswordFn := func(ctx context.Context) (string, error) {
 		<-ctx.Done() // wait for timeout
 		return "", ctx.Err()
 	}
-	promptWebauthnNoop := func(ctx context.Context, origin string, assertion *wanlib.CredentialAssertion) (*proto.MFAAuthenticateResponse, error) {
+	noopWebauthnFn := func(ctx context.Context, origin string, assertion *wanlib.CredentialAssertion) (*proto.MFAAuthenticateResponse, error) {
 		<-ctx.Done() // wait for timeout
 		return nil, ctx.Err()
 	}
@@ -115,22 +113,22 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 
 	ctx := context.Background()
 	tests := []struct {
-		name          string
-		secondFactor  constants.SecondFactorType
-		solveOTP      func(context.Context) (string, error)
-		solveWebauthn func(ctx context.Context, origin string, assertion *wanlib.CredentialAssertion) (*proto.MFAAuthenticateResponse, error)
+		name                string
+		secondFactor        constants.SecondFactorType
+		passwordFromConsole func(ctx context.Context) (string, error)
+		solveWebauthn       func(ctx context.Context, origin string, assertion *wanlib.CredentialAssertion) (*proto.MFAAuthenticateResponse, error)
 	}{
 		{
-			name:          "OK OTP device login",
-			secondFactor:  constants.SecondFactorOptional,
-			solveOTP:      solveOTP,
-			solveWebauthn: promptWebauthnNoop,
+			name:                "OK OTP device login",
+			secondFactor:        constants.SecondFactorOptional,
+			passwordFromConsole: chainPasswordFns(userPasswordFn, solveOTP),
+			solveWebauthn:       noopWebauthnFn,
 		},
 		{
-			name:          "OK Webauthn device login",
-			secondFactor:  constants.SecondFactorOptional,
-			solveOTP:      promptOTPNoop,
-			solveWebauthn: solveWebauthn,
+			name:                "OK Webauthn device login",
+			secondFactor:        constants.SecondFactorOptional,
+			passwordFromConsole: chainPasswordFns(userPasswordFn, noopPasswordFn),
+			solveWebauthn:       solveWebauthn,
 		},
 	}
 	for _, test := range tests {
@@ -138,8 +136,8 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			*client.PromptOTP = func(out io.Writer, question string) (string, error) {
-				return test.solveOTP(ctx)
+			*client.PasswordFromConsoleFn = func() (string, error) {
+				return test.passwordFromConsole(ctx)
 			}
 			*client.PromptWebauthn = func(ctx context.Context, origin, _ string, assertion *wanlib.CredentialAssertion, _ wancli.LoginPrompt) (*proto.MFAAuthenticateResponse, string, error) {
 				resp, err := test.solveWebauthn(ctx, origin, assertion)
@@ -161,6 +159,15 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 			_, err = tc.Login(ctx)
 			require.NoError(t, err)
 		})
+	}
+}
+
+func chainPasswordFns(fns ...func(ctx context.Context) (string, error)) func(context.Context) (string, error) {
+	i := 0
+	return func(ctx context.Context) (string, error) {
+		val, err := fns[i](ctx)
+		i++
+		return val, err
 	}
 }
 

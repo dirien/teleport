@@ -31,8 +31,7 @@ import (
 	wancli "github.com/gravitational/teleport/lib/auth/webauthncli"
 )
 
-// promptOTP and promptWebauthn provide indirection for tests.
-var promptOTP = ReadPassword
+// promptWebauthn provides indirection for tests.
 var promptWebauthn = wancli.Login
 
 type stdinRead struct {
