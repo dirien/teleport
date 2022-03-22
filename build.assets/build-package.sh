@@ -188,6 +188,9 @@ elif [[ "${ARCH}" == "amd64" ]]; then
     TEXT_ARCH="64-bit"
 elif [[ "${ARCH}" == "arm" ]]; then
     TEXT_ARCH="ARMv7"
+    if [[ "${PACKAGE_TYPE}" == "deb" ]]; then
+        ARCH="armhf" # we build for linux-gnueabihf
+    fi
 elif [[ "${ARCH}" == "arm64" ]]; then
     TEXT_ARCH="ARMv8/ARM64"
     if [[ "${PACKAGE_TYPE}" == "rpm" ]]; then
