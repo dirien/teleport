@@ -50,9 +50,13 @@ func (h *stdinHijack) startRead() {
 	if !atomic.CompareAndSwapInt32(&h.started, 0, 1) {
 		return // Already started
 	}
+	// Take a local copy of PasswordFromConsole, it avoids data races in case it
+	// changes (for example, during tests).
+	// Under normal circumstances it's not expected to change.
+	prompt := PasswordFromConsole
 	h.C = make(chan stdinRead)
 	go func() {
-		value, err := PasswordFromConsole()
+		value, err := prompt()
 		h.C <- stdinRead{value: value, err: err}
 	}()
 }
