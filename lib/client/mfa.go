@@ -18,7 +18,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -59,18 +58,24 @@ func (h *stdinHijack) startRead() {
 	}()
 }
 
-type noopPrompt struct{}
-
-func (p noopPrompt) PromptPIN() (string, error) {
-	// TODO(codingllama): Revisit? There may be authenticators out there that disagree.
-	// The main issue with PIN prompts in MFA is that prompts.OTP hijacks Stdin,
-	// so we'd have to make that into a password read and redirect it into either
-	// an OTP (not sensitive) or a PIN (sensitive).
-	return "", errors.New("PIN not supported for MFA")
+// mfaPrompt implements wancli.LoginPrompt for MFA logins.
+// In most cases authenticators shouldn't require PINs or additional touches for
+// MFA, but the implementation exists in case we find some unusual
+// authenticators out there.
+type mfaPrompt struct {
+	stdin *stdinHijack
 }
 
-func (p noopPrompt) PromptAdditionalTouch() error {
-	return errors.New("additional touches not supported for MFA")
+func (p *mfaPrompt) PromptPIN() (string, error) {
+	p.stdin.startRead() // as late as possible, in case it's not needed
+	fmt.Fprintln(os.Stderr, "Enter your security key PIN:")
+	read := <-p.stdin.C
+	return read.value, read.err
+}
+
+func (p *mfaPrompt) PromptAdditionalTouch() error {
+	fmt.Fprintf(os.Stderr, "Tap your security key again to complete login")
+	return nil
 }
 
 // PromptMFAChallenge prompts the user to complete MFA authentication
@@ -171,8 +176,8 @@ func PromptMFAChallenge(
 		go func() {
 			defer wg.Done()
 			log.Debugf("WebAuthn: prompting devices with origin %q", origin)
-			const user = ""       // No ambiguity in MFA prompts.
-			var prompt noopPrompt // No PINs or additional touches required for MFA.
+			const user = ""
+			prompt := &mfaPrompt{stdin: stdin}
 			resp, _, err := promptWebauthn(ctx, origin, user, wanlib.CredentialAssertionFromProto(c.WebauthnChallenge), prompt)
 			respC <- response{kind: "WEBAUTHN", resp: resp, err: err}
 		}()
