@@ -2651,7 +2651,7 @@ func (tc *TeleportClient) ShowMOTD(ctx context.Context) error {
 		// use might enter at the prompt. Whatever the user enters will
 		// be simply discarded, and the user can still CTRL+C out if they
 		// disagree.
-		_, err := passwordFromConsoleFn()
+		_, err := PasswordFromConsole()
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -3115,7 +3115,7 @@ func ReadPassword(out io.Writer, question string) (string, error) {
 	if question != "" {
 		fmt.Fprintln(out, question)
 	}
-	pwd, err := passwordFromConsoleFn()
+	pwd, err := PasswordFromConsole()
 	if err != nil {
 		fmt.Fprintln(out, err)
 		return "", trace.Wrap(err)
@@ -3188,11 +3188,13 @@ func (tc *TeleportClient) loadTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// passwordFromConsoleFn allows tests to replace the passwordFromConsole
-// function.
-var passwordFromConsoleFn = passwordFromConsole
+// PasswordFromConsole reads from stdin without echoing typed characters to
+// stdout.
+// The var declaration allows tests to mock the console interaction.
+var PasswordFromConsole = passwordFromConsole
 
-// passwordFromConsole reads from stdin without echoing typed characters to stdout
+// passwordFromConsole reads from stdin without echoing typed characters to
+// stdout.
 func passwordFromConsole() (string, error) {
 	fd := int(os.Stdin.Fd())
 	state, err := term.GetState(fd)

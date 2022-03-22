@@ -78,9 +78,9 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 	cfg.InsecureSkipVerify = true
 
 	// Reset functions after tests.
-	oldPwd, oldWebauthn := *client.PasswordFromConsoleFn, *client.PromptWebauthn
+	oldPwd, oldWebauthn := client.PasswordFromConsole, *client.PromptWebauthn
 	t.Cleanup(func() {
-		*client.PasswordFromConsoleFn = oldPwd
+		client.PasswordFromConsole = oldPwd
 		*client.PromptWebauthn = oldWebauthn
 	})
 
@@ -136,7 +136,7 @@ func TestTeleportClient_Login_localMFALogin(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			*client.PasswordFromConsoleFn = func() (string, error) {
+			client.PasswordFromConsole = func() (string, error) {
 				return test.passwordFromConsole(ctx)
 			}
 			*client.PromptWebauthn = func(ctx context.Context, origin, _ string, assertion *wanlib.CredentialAssertion, _ wancli.LoginPrompt) (*proto.MFAAuthenticateResponse, string, error) {
